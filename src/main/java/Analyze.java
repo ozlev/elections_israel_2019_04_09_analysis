@@ -1,23 +1,20 @@
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVPrinter;
 import org.apache.commons.csv.CSVRecord;
+import org.apache.commons.io.ByteOrderMark;
 import org.apache.commons.io.input.BOMInputStream;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.function.BinaryOperator;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * Created by USER on 4/12/2019.
  */
 public class Analyze {
 
-    private static final String CHARS = "אבגבדהוזחטיךכלםמןנסעףפץצקרשת";
     public static void main(String[] args) {
         try {
             // Read parties
@@ -39,31 +36,38 @@ public class Analyze {
             displayVotes(national);
 
             // Check for some basic issues
-            checkBasicIssues(polls, national);
+            List<AnalyzedVotingData> analysis = polls.stream().map(AnalyzedVotingData::new).collect(Collectors.toList());
+            checkBasicIssues(analysis);
 
-            checkBySettlement(polls);
+            checkBySettlement(analysis);
+
+            System.out.printf("Saving report%n");
+            File outputFile = new File("analysis/all_ballot_places.csv");
+            outputFile.getParentFile().mkdirs();
+            generateReport(outputFile, analysis, national);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private static void checkBySettlement(List<VotingData> allPolls) {
-        Map<String, List<VotingData>> bySettlement = allPolls.stream()
-                .collect(Collectors.groupingBy(VotingData::getSymbol));
+    private static void checkBySettlement(List<AnalyzedVotingData> allPolls) {
+        Map<String, List<AnalyzedVotingData>> bySettlement = allPolls.stream()
+                .collect(Collectors.groupingBy(a -> a.getData().getSymbol()));
 
-        for (Map.Entry<String, List<VotingData>> e : bySettlement.entrySet()) {
-            List<VotingData> polls = e.getValue();
+        for (Map.Entry<String, List<AnalyzedVotingData>> e : bySettlement.entrySet()) {
+            List<AnalyzedVotingData> polls = e.getValue();
             // Skip places with too few polls
             if (polls.size() < 5) {
                 continue;
             }
-            VotingData settlementTotal = countVotes(polls, "*", "*", "*");
-            for (VotingData poll : polls) {
-                Map<Party, Double> pn = poll.getNormalizedVotesByParty();
+            List<VotingData> allData = polls.stream().map(AnalyzedVotingData::getData).collect(Collectors.toList());
+            VotingData settlementTotal = countVotes(allData, "*", "*", "*");
+            for (AnalyzedVotingData poll : polls) {
+                Map<Party, Double> pn = poll.getData().getNormalizedVotesByParty();
                 Map<Party, Double> sn = settlementTotal.getNormalizedVotesByParty();
                 if (!pn.keySet().equals(sn.keySet())) {
                     System.out.printf("Mismatching keys between %s and its ballot %s:%n%s%n%s%n",
-                            poll.getSettlement(), poll.getBallotBoxId(), pn.keySet(), sn.keySet());
+                            poll.getData().getSettlement(), poll.getData().getBallotBoxId(), pn.keySet(), sn.keySet());
                 }
                 double dist = 0d;
                 for (Party p : pn.keySet()) {
@@ -72,34 +76,34 @@ public class Analyze {
                     dist += Math.pow(v1 - v2, 2);
                 }
                 if (dist > 0.5) {
-                    System.out.printf("%s %s - Dist from settlement average is %.3f%n", poll.getSettlement(), poll.getBallotBoxId(), dist);
+                    System.out.printf("%s %s - Dist from settlement average is %.3f%n", poll.getData().getSettlement(), poll.getData().getBallotBoxId(), dist);
                 }
+                poll.setSettlementDistanceRatio(dist);
             }
         }
     }
 
-    private static void checkBasicIssues(List<VotingData> polls, VotingData national) {
-        // Determine what the min valid percent is that is not suspicous
-        double minValid = determineMinValid(national);
-
-        for (VotingData d : polls) {
-            List<String> issues = d.getSimpleIssues(minValid);
+    private static void checkBasicIssues(List<AnalyzedVotingData> polls) {
+        for (AnalyzedVotingData analysis : polls) {
+            VotingData data = analysis.getData();
+            List<String> issues = data.getSimpleIssues();
+            analysis.setIssues(issues);
+            double validPercent = validPercent(data);
+            analysis.setValidPercent(validPercent);
             if (!issues.isEmpty()) {
                 System.out.printf("***********************************************%n");
-                System.out.printf("Issues in ballot %s (%s)%n", d.getBallotBoxId(), d.getSettlement());
+                System.out.printf("Issues in ballot %s (%s)%n", data.getBallotBoxId(), data.getSettlement());
                 for (String issue : issues) {
                     System.out.printf("%s%n", issue);
                 }
+
+
             }
         }
     }
 
-    private static double determineMinValid(VotingData national) {
-        double disqPercent = 100d * national.getDisqualifiedVotes() / national.getTotalVotes();
-        System.out.printf("National Invalid percent is %.3f%n", disqPercent);
-        double minInvalid = disqPercent * 5;
-        System.out.printf("Min Invalid Percent to report is %.3f%n", minInvalid);
-        return 100 - (minInvalid);
+    private static double validPercent(VotingData data) {
+        return 100d * data.getValidVotes() / data.getTotalVotes();
     }
 
     private static List<VotingData> readPollsData(Map<String, Party> parties) throws IOException {
@@ -193,18 +197,40 @@ public class Analyze {
         return result;
     }
 
-    private static String translate(String orig) {
-        StringBuilder output = new StringBuilder();
-        for (char c : orig.toCharArray()) {
-            int i = (int)c;
-            if (i >= 224 && i <= 250) {
-                int pos = i - 224;
-                output.append(CHARS.charAt(pos));
-            } else {
-                output.append(c);
-            }
+    private static void generateReport(File output, List<AnalyzedVotingData> analysis, VotingData national) throws IOException {
+        List<String> headers = new ArrayList<>();
+        headers.add("יישוב");
+        headers.add("סמל");
+        headers.add("קלפי");
+        headers.add("בעלי זכות הצבעה");
+        headers.add("הצביעו");
+        headers.add("קולות פסולים");
+        headers.add("קולות כשרים");
+        headers.add("אחוז פסולים");
+        headers.add("סכום מרחקים מממוצע היישוב");
+        headers.add("הערות");
+
+        LinkedHashMap<Party, Integer> byVotes = national.getVotesByParty().entrySet().stream()
+                .sorted(Map.Entry.<Party, Integer>comparingByValue().reversed())
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
+
+        List<Party> partyOrder = new ArrayList<>(byVotes.keySet());
+        for (Party p : byVotes.keySet()) {
+            headers.add(p.getName() + " - " + p.getBallot());
         }
 
-        return output.toString();
+        String[] hedearsArray = headers.toArray(new String[headers.size()]);
+        FileWriter out = new FileWriter(output);
+        out.write(ByteOrderMark.UTF_BOM);
+        CSVPrinter printer = new CSVPrinter(out, CSVFormat.EXCEL.withHeader(hedearsArray));
+        AnalyzedVotingData nationalAnalysis = new AnalyzedVotingData(national);
+        nationalAnalysis.setValidPercent(validPercent(national));
+        nationalAnalysis.setIssues(Collections.emptyList());
+        printer.printRecord(nationalAnalysis.toRecord(partyOrder));
+        for (AnalyzedVotingData pollAnalysis : analysis) {
+            printer.printRecord(pollAnalysis.toRecord(partyOrder));
+        }
+        printer.close();
     }
+
 }

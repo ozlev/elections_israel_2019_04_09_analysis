@@ -95,10 +95,9 @@ public class VotingData {
 
     /**
      * Check the voting data for obvious incongruencies (such as total not equal to sum of votes)
-     * @param minValidPercent minimum valid percent of the votes
      * @return list of issues (empty if all is fine)
      */
-    public List<String> getSimpleIssues(double minValidPercent) {
+    public List<String> getSimpleIssues() {
         List<String> issues = new ArrayList<>();
         // Double envelopes don't have a suffrage size...
         if (suffrageSize > 0 && totalVotes > suffrageSize) {
@@ -107,13 +106,6 @@ public class VotingData {
 
         if (totalVotes != disqualifiedVotes + validVotes) {
             issues.add(String.format("Mismatch total votes. Valid + Disqualified != Total: %,d + %,d != %,d", validVotes, disqualifiedVotes, totalVotes));
-        }
-
-        if (totalVotes > 50 && disqualifiedVotes > 2) {
-            double validPercent = 100d * validVotes / totalVotes;
-            if (validPercent < minValidPercent){
-                issues.add(String.format("Valid ratio too low (%.2f%%). Total votes: %,d ; Disqualified: %,d", validPercent, totalVotes, disqualifiedVotes));
-            }
         }
 
         int totalByParty = votesByParty.values().stream().mapToInt(Integer::intValue).sum();
