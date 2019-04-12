@@ -22,67 +22,92 @@ public class Analyze {
         try {
             // Read parties
             Map<String, Party> parties = readParties();
-            System.out.printf("Parties are: %s%n", parties);
-
-            List<VotingData> polls = new ArrayList<>();
-            InputStream is = Analyze.class.getResourceAsStream("/stats/2019_04_12_16_30/expb.csv");
-            CSVParser parser = new CSVParser(new InputStreamReader(is, "ISO-8859-8"), CSVFormat.EXCEL.withHeader());
-
-            // Ensure we have all parties
-            for (Map.Entry<String, Integer> h : parser.getHeaderMap().entrySet()) {
-                if (h.getValue() <= 6) {
-                    continue;
-                }
-
-                Party party = parties.get(h.getKey());
-                if (party == null) {
-                    throw new IllegalStateException("Missing party with letter '" + h.getKey() + "'. Please update parties.csv");
-                }
+            System.out.printf("Our %,d Parties are:%n", parties.size());
+            for (Party p : parties.values()) {
+                System.out.printf("%s (%s)%n", p.getName(), p.getBallot());
             }
 
-            for (CSVRecord record : parser) {
-                // Read party votes
-                Map<Party, Integer> votes = new HashMap<>();
-                for (Party p : parties.values()) {
-                    Integer v = Integer.valueOf(record.get(p.getBallot()));
-                    votes.put(p, v);
-                }
+            // Read data from all the polls
+            List<VotingData> polls = readPollsData(parties);
 
-                VotingData place = new VotingData(record.get(0),
-                        record.get(1), record.get(2),
-                        Integer.valueOf(record.get(3)),
-                        Integer.valueOf(record.get(4)),
-                        Integer.valueOf(record.get(5)),
-                        Integer.valueOf(record.get(6)),
-                        votes
-                );
-                polls.add(place);
-            }
-
+            System.out.printf("%n");
             System.out.printf("Polls size: %d%n", polls.size());
 
             // Count national votes.
             VotingData national = countVotes(polls, "*", "*", "*");
-            double disqPercent = 100d * national.getDisqualifiedVotes() / national.getTotalVotes();
-            System.out.printf("National Invalid percent is %.3f%n", disqPercent);
-            double minInvalid = disqPercent * 5;
-            System.out.printf("Min Invalid Percent to report is %.3f%n", minInvalid);
-            double minValid = 100 - (minInvalid);
-
-            for (VotingData d : polls) {
-                List<String> issues = d.getSimpleIssues(minValid);
-                if (!issues.isEmpty()) {
-                    System.out.printf("***********************************************%n");
-                    System.out.printf("Issues in ballot %s (%s)%n", d.getBallotBoxId(), d.getSettlement());
-                    for (String issue : issues) {
-                        System.out.printf("%s%n", issue);
-                    }
-                }
-            }
-
+            // Display totals
             displayVotes(national);
+
+            // Check for some basic issues
+            checkBasicIssues(polls, national);
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    private static void checkBasicIssues(List<VotingData> polls, VotingData national) {
+        // Determine what the min valid percent is that is not suspicous
+        double minValid = determineMinValid(national);
+
+        for (VotingData d : polls) {
+            List<String> issues = d.getSimpleIssues(minValid);
+            if (!issues.isEmpty()) {
+                System.out.printf("***********************************************%n");
+                System.out.printf("Issues in ballot %s (%s)%n", d.getBallotBoxId(), d.getSettlement());
+                for (String issue : issues) {
+                    System.out.printf("%s%n", issue);
+                }
+            }
+        }
+    }
+
+    private static double determineMinValid(VotingData national) {
+        double disqPercent = 100d * national.getDisqualifiedVotes() / national.getTotalVotes();
+        System.out.printf("National Invalid percent is %.3f%n", disqPercent);
+        double minInvalid = disqPercent * 5;
+        System.out.printf("Min Invalid Percent to report is %.3f%n", minInvalid);
+        return 100 - (minInvalid);
+    }
+
+    private static List<VotingData> readPollsData(Map<String, Party> parties) throws IOException {
+        List<VotingData> polls = new ArrayList<>();
+        InputStream is = Analyze.class.getResourceAsStream("/stats/2019_04_12_16_30/expb.csv");
+        CSVParser parser = new CSVParser(new InputStreamReader(is, "ISO-8859-8"), CSVFormat.EXCEL.withHeader());
+
+        // Ensure we have all parties
+        verifyPartyList(parties, parser);
+
+        for (CSVRecord record : parser) {
+            // Read party votes
+            Map<Party, Integer> votes = new HashMap<>();
+            for (Party p : parties.values()) {
+                Integer v = Integer.valueOf(record.get(p.getBallot()));
+                votes.put(p, v);
+            }
+
+            VotingData place = new VotingData(record.get(0),
+                    record.get(1), record.get(2),
+                    Integer.valueOf(record.get(3)),
+                    Integer.valueOf(record.get(4)),
+                    Integer.valueOf(record.get(5)),
+                    Integer.valueOf(record.get(6)),
+                    votes
+            );
+            polls.add(place);
+        }
+        return polls;
+    }
+
+    private static void verifyPartyList(Map<String, Party> parties, CSVParser parser) {
+        for (Map.Entry<String, Integer> h : parser.getHeaderMap().entrySet()) {
+            if (h.getValue() <= 6) {
+                continue;
+            }
+
+            Party party = parties.get(h.getKey());
+            if (party == null) {
+                throw new IllegalStateException("Missing party with letter '" + h.getKey() + "'. Please update parties.csv");
+            }
         }
     }
 
