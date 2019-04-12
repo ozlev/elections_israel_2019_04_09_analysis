@@ -40,8 +40,39 @@ public class Analyze {
 
             // Check for some basic issues
             checkBasicIssues(polls, national);
+
+            checkBySettlement(polls);
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    private static void checkBySettlement(List<VotingData> allPolls) {
+        Map<String, List<VotingData>> bySettlement = allPolls.stream()
+                .collect(Collectors.groupingBy(VotingData::getSymbol));
+
+        for (Map.Entry<String, List<VotingData>> e : bySettlement.entrySet()) {
+            List<VotingData> polls = e.getValue();
+            // Skip places with too few polls
+            if (polls.size() < 5) {
+                continue;
+            }
+            VotingData settlementTotal = countVotes(polls, "*", "*", "*");
+            for (VotingData poll : polls) {
+                Map<Party, Double> pn = poll.getNormalizedVotesByParty();
+                Map<Party, Double> sn = settlementTotal.getNormalizedVotesByParty();
+                if (!pn.keySet().equals(sn.keySet())) {
+                    System.out.printf("Mismatching keys between %s and its ballot %s:%n%s%n%s%n",
+                            poll.getSettlement(), poll.getBallotBoxId(), pn.keySet(), sn.keySet());
+                }
+                double dist = 0d;
+                for (Party p : pn.keySet()) {
+                    Double v1 = pn.get(p);
+                    Double v2 = sn.get(p);
+                    dist += Math.pow(v1 - v2, 2);
+                }
+                System.out.printf("%s %s - Dist is %.3f%n", poll.getSettlement(), poll.getBallotBoxId(), dist);
+            }
         }
     }
 

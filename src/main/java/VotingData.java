@@ -1,7 +1,4 @@
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class VotingData {
     private final String settlement;
@@ -14,6 +11,9 @@ public class VotingData {
 
     private final Map<Party, Integer> votesByParty;
 
+    // The same data as votes by party, but normalized so that the total votes is 1
+    private final Map<Party, Double> normalizedVotesByParty;
+
     public VotingData(String settlement, String symbol, String ballotBoxId, int suffrageSize, int totalVotes, int disqualifiedVotes, int validVotes, Map<Party, Integer> votesByParty) {
         this.settlement = settlement;
         this.symbol = symbol;
@@ -23,6 +23,15 @@ public class VotingData {
         this.disqualifiedVotes = disqualifiedVotes;
         this.validVotes = validVotes;
         this.votesByParty = votesByParty;
+
+
+        double totalByParty = votesByParty.values().stream().mapToInt(Integer::intValue).sum();
+        normalizedVotesByParty = new HashMap<>();
+        if (totalByParty > 0){
+            for (Map.Entry<Party, Integer> entry : votesByParty.entrySet()) {
+                normalizedVotesByParty.put(entry.getKey(), entry.getValue() / totalByParty);
+            }
+        }
     }
 
     public String getSettlement() {
@@ -54,7 +63,11 @@ public class VotingData {
     }
 
     public Map<Party, Integer> getVotesByParty() {
-        return votesByParty;
+        return Collections.unmodifiableMap(votesByParty);
+    }
+
+    public Map<Party, Double> getNormalizedVotesByParty() {
+        return Collections.unmodifiableMap(normalizedVotesByParty);
     }
 
     public static VotingData combine(VotingData v1, VotingData v2) {
