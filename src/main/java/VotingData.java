@@ -2,6 +2,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class VotingData {
     private final String settlement;
@@ -82,9 +83,10 @@ public class VotingData {
 
     /**
      * Check the voting data for obvious incongruencies (such as total not equal to sum of votes)
+     * @param minValidPercent minimum valid percent of the votes
      * @return list of issues (empty if all is fine)
      */
-    public List<String> getSimpleIssues() {
+    public List<String> getSimpleIssues(double minValidPercent) {
         List<String> issues = new ArrayList<>();
         // Double envelopes don't have a suffrage size...
         if (suffrageSize > 0 && totalVotes > suffrageSize) {
@@ -95,9 +97,17 @@ public class VotingData {
             issues.add(String.format("Mismatch total votes. Valid + Disqualified != Total: %,d + %,d != %,d", validVotes, disqualifiedVotes, totalVotes));
         }
 
-        double validRatio = 100d * validVotes / totalVotes;
-        if (totalVotes > 50 && validRatio < 95) {
-            issues.add(String.format("Valid ratio too low (%.2f%%). Total votes: %,d ; Disqualified: %,d", validRatio, totalVotes, disqualifiedVotes));
+        if (totalVotes > 50 && disqualifiedVotes > 2) {
+            double validPercent = 100d * validVotes / totalVotes;
+            if (validPercent < minValidPercent){
+                issues.add(String.format("Valid ratio too low (%.2f%%). Total votes: %,d ; Disqualified: %,d", validPercent, totalVotes, disqualifiedVotes));
+            }
+        }
+
+        int totalByParty = votesByParty.values().stream().mapToInt(Integer::intValue).sum();
+        if (totalByParty != validVotes) {
+            issues.add(String.format("Total by party != total (%,d != %,d)", totalByParty, validVotes));
+            System.out.printf("%s%n", votesByParty);
         }
 
         return issues;

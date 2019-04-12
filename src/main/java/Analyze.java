@@ -27,6 +27,19 @@ public class Analyze {
             List<VotingData> polls = new ArrayList<>();
             InputStream is = Analyze.class.getResourceAsStream("/stats/2019_04_12_16_30/expb.csv");
             CSVParser parser = new CSVParser(new InputStreamReader(is, "ISO-8859-8"), CSVFormat.EXCEL.withHeader());
+
+            // Ensure we have all parties
+            for (Map.Entry<String, Integer> h : parser.getHeaderMap().entrySet()) {
+                if (h.getValue() <= 6) {
+                    continue;
+                }
+
+                Party party = parties.get(h.getKey());
+                if (party == null) {
+                    throw new IllegalStateException("Missing party with letter '" + h.getKey() + "'. Please update parties.csv");
+                }
+            }
+
             for (CSVRecord record : parser) {
                 // Read party votes
                 Map<Party, Integer> votes = new HashMap<>();
@@ -48,8 +61,16 @@ public class Analyze {
 
             System.out.printf("Polls size: %d%n", polls.size());
 
+            // Count national votes.
+            VotingData national = countVotes(polls, "*", "*", "*");
+            double disqPercent = 100d * national.getDisqualifiedVotes() / national.getTotalVotes();
+            System.out.printf("National Invalid percent is %.3f%n", disqPercent);
+            double minInvalid = disqPercent * 5;
+            System.out.printf("Min Invalid Percent to report is %.3f%n", minInvalid);
+            double minValid = 100 - (minInvalid);
+
             for (VotingData d : polls) {
-                List<String> issues = d.getSimpleIssues();
+                List<String> issues = d.getSimpleIssues(minValid);
                 if (!issues.isEmpty()) {
                     System.out.printf("***********************************************%n");
                     System.out.printf("Issues in ballot %s (%s)%n", d.getBallotBoxId(), d.getSettlement());
@@ -59,8 +80,7 @@ public class Analyze {
                 }
             }
 
-            VotingData total = countVotes(polls, null, null, null);
-            displayVotes(total);
+            displayVotes(national);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -71,9 +91,13 @@ public class Analyze {
         VotingData base = new VotingData(settlement, settlementSymbol, ballotBoxId, 0, 0, 0, 0, new HashMap<>());
 
         return polls.stream()
-                .filter(p -> settlementSymbol == null || p.getBallotBoxId().matches(settlementSymbol))
-                .filter(p -> ballotBoxId == null || p.getBallotBoxId().matches(ballotBoxId))
+                .filter(p -> settlementSymbol == null || p.getBallotBoxId().matches(toWildcard(settlementSymbol)))
+                .filter(p -> ballotBoxId == null || p.getBallotBoxId().matches(toWildcard(ballotBoxId)))
                 .reduce(base, VotingData::combine);
+    }
+
+    private static String toWildcard(String pattern) {
+        return pattern.replace("?", ".?").replace("*", ".*?");
     }
 
     private static void displayVotes(VotingData data) {
