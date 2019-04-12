@@ -119,7 +119,6 @@ public class VotingData {
         int totalByParty = votesByParty.values().stream().mapToInt(Integer::intValue).sum();
         if (totalByParty != validVotes) {
             issues.add(String.format("Total by party != total (%,d != %,d)", totalByParty, validVotes));
-            System.out.printf("%s%n", votesByParty);
         }
 
         return issues;

@@ -71,7 +71,9 @@ public class Analyze {
                     Double v2 = sn.get(p);
                     dist += Math.pow(v1 - v2, 2);
                 }
-                System.out.printf("%s %s - Dist is %.3f%n", poll.getSettlement(), poll.getBallotBoxId(), dist);
+                if (dist > 0.5) {
+                    System.out.printf("%s %s - Dist from settlement average is %.3f%n", poll.getSettlement(), poll.getBallotBoxId(), dist);
+                }
             }
         }
     }
