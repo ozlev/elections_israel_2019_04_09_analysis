@@ -1,6 +1,8 @@
 ## Israeli Election 2019  Analysis
 Some code to analyze data from the Israeli General Elections held on April 9, 2019
 
+Feel free to add more tests and analyses to it, just don't cheat!
+
 ## How to Use
 The expb.csv file contains the data from the Central Election Committee site https://votes21.bechirot.gov.il
 
