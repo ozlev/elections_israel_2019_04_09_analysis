@@ -24,51 +24,49 @@ public class Analyze {
                 System.out.printf("%s (%s)%n", p.getName(), p.getBallot());
             }
 
-            // Read data from all the polls
-            List<VotingData> polls = readPollsData(parties);
+            // Read data from all the ballot places
+            List<VotingData> ballots = readAllBallots(parties);
+            System.out.printf("%nBallots size: %d%n", ballots.size());
 
-            System.out.printf("%n");
-            System.out.printf("Polls size: %d%n", polls.size());
-
-            // Count national votes.
-            VotingData national = countVotes(polls, "*", "*", "*");
-            // Display totals
+            // Count national votes and display
+            VotingData national = countVotes(ballots, "*", "*", "*");
             displayVotes(national);
 
             // Check for some basic issues
-            List<AnalyzedVotingData> analysis = polls.stream().map(AnalyzedVotingData::new).collect(Collectors.toList());
+            List<AnalyzedVotingData> analysis = ballots.stream().map(AnalyzedVotingData::new).collect(Collectors.toList());
             checkBasicIssues(analysis);
 
+            // Generate stats by settlement
             checkBySettlement(analysis);
 
-            System.out.printf("Saving report%n");
-            File outputFile = new File("analysis/all_ballot_places.csv");
-            outputFile.getParentFile().mkdirs();
-            generateReport(outputFile, analysis, national);
+            // Generate analysis file
+            generateReport(analysis, national);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private static void checkBySettlement(List<AnalyzedVotingData> allPolls) {
-        Map<String, List<AnalyzedVotingData>> bySettlement = allPolls.stream()
+    private static void checkBySettlement(List<AnalyzedVotingData> allBallots) {
+        Map<String, List<AnalyzedVotingData>> bySettlement = allBallots.stream()
                 .collect(Collectors.groupingBy(a -> a.getData().getSymbol()));
 
         for (Map.Entry<String, List<AnalyzedVotingData>> e : bySettlement.entrySet()) {
-            List<AnalyzedVotingData> polls = e.getValue();
-            // Skip places with too few polls
-            if (polls.size() < 5) {
+            // Get the ballots for the current settlement
+            List<AnalyzedVotingData> cur = e.getValue();
+            // Skip places with too few ballots
+            if (cur.size() < 5) {
                 continue;
             }
-            List<VotingData> allData = polls.stream().map(AnalyzedVotingData::getData).collect(Collectors.toList());
+            List<VotingData> allData = cur.stream().map(AnalyzedVotingData::getData).collect(Collectors.toList());
             VotingData settlementTotal = countVotes(allData, "*", "*", "*");
-            for (AnalyzedVotingData poll : polls) {
-                Map<Party, Double> pn = poll.getData().getNormalizedVotesByParty();
+            for (AnalyzedVotingData analysis : cur) {
+                Map<Party, Double> pn = analysis.getData().getNormalizedVotesByParty();
                 Map<Party, Double> sn = settlementTotal.getNormalizedVotesByParty();
                 if (!pn.keySet().equals(sn.keySet())) {
                     System.out.printf("Mismatching keys between %s and its ballot %s:%n%s%n%s%n",
-                            poll.getData().getSettlement(), poll.getData().getBallotBoxId(), pn.keySet(), sn.keySet());
+                            analysis.getData().getSettlement(), analysis.getData().getBallotBoxId(), pn.keySet(), sn.keySet());
                 }
+                // Check sum of square distances from settlement average for each party (todo: should we generate an average without this ballot?)
                 double dist = 0d;
                 for (Party p : pn.keySet()) {
                     Double v1 = pn.get(p);
@@ -76,15 +74,15 @@ public class Analyze {
                     dist += Math.pow(v1 - v2, 2);
                 }
                 if (dist > 0.5) {
-                    System.out.printf("%s %s - Dist from settlement average is %.3f%n", poll.getData().getSettlement(), poll.getData().getBallotBoxId(), dist);
+                    System.out.printf("%s %s - Dist from settlement average is %.3f%n", analysis.getData().getSettlement(), analysis.getData().getBallotBoxId(), dist);
                 }
-                poll.setSettlementDistanceRatio(dist);
+                analysis.setSettlementDistanceRatio(dist);
             }
         }
     }
 
-    private static void checkBasicIssues(List<AnalyzedVotingData> polls) {
-        for (AnalyzedVotingData analysis : polls) {
+    private static void checkBasicIssues(List<AnalyzedVotingData> allBallots) {
+        for (AnalyzedVotingData analysis : allBallots) {
             VotingData data = analysis.getData();
             List<String> issues = data.getSimpleIssues();
             analysis.setIssues(issues);
@@ -106,8 +104,8 @@ public class Analyze {
         return 100d * data.getValidVotes() / data.getTotalVotes();
     }
 
-    private static List<VotingData> readPollsData(Map<String, Party> parties) throws IOException {
-        List<VotingData> polls = new ArrayList<>();
+    private static List<VotingData> readAllBallots(Map<String, Party> parties) throws IOException {
+        List<VotingData> result = new ArrayList<>();
         InputStream is = Analyze.class.getResourceAsStream("/stats/2019_04_12_16_30/expb.csv");
         CSVParser parser = new CSVParser(new InputStreamReader(is, "ISO-8859-8"), CSVFormat.EXCEL.withHeader());
 
@@ -130,9 +128,9 @@ public class Analyze {
                     Integer.valueOf(record.get(6)),
                     votes
             );
-            polls.add(place);
+            result.add(place);
         }
-        return polls;
+        return result;
     }
 
     private static void verifyPartyList(Map<String, Party> parties, CSVParser parser) {
@@ -148,11 +146,10 @@ public class Analyze {
         }
     }
 
-    private static VotingData countVotes(List<VotingData> polls, String settlement, String settlementSymbol, String ballotBoxId) {
-
+    @SuppressWarnings("SameParameterValue")
+    private static VotingData countVotes(List<VotingData> allBallots, String settlement, String settlementSymbol, String ballotBoxId) {
         VotingData base = new VotingData(settlement, settlementSymbol, ballotBoxId, 0, 0, 0, 0, new HashMap<>());
-
-        return polls.stream()
+        return allBallots.stream()
                 .filter(p -> settlementSymbol == null || p.getBallotBoxId().matches(toWildcard(settlementSymbol)))
                 .filter(p -> ballotBoxId == null || p.getBallotBoxId().matches(toWildcard(ballotBoxId)))
                 .reduce(base, VotingData::combine);
@@ -197,7 +194,12 @@ public class Analyze {
         return result;
     }
 
-    private static void generateReport(File output, List<AnalyzedVotingData> analysis, VotingData national) throws IOException {
+    private static void generateReport(List<AnalyzedVotingData> analysis, VotingData national) throws IOException {
+        System.out.printf("Saving report%n");
+        File output = new File("analysis/all_ballot_places.csv");
+        //noinspection ResultOfMethodCallIgnored
+        output.getParentFile().mkdirs();
+
         List<String> headers = new ArrayList<>();
         headers.add("יישוב");
         headers.add("סמל");
@@ -219,10 +221,11 @@ public class Analyze {
             headers.add(p.getName() + " - " + p.getBallot());
         }
 
-        String[] hedearsArray = headers.toArray(new String[headers.size()]);
+        @SuppressWarnings("ToArrayCallWithZeroLengthArrayArgument")
+        String[] headersArray = headers.toArray(new String[headers.size()]);
         FileWriter out = new FileWriter(output);
         out.write(ByteOrderMark.UTF_BOM);
-        CSVPrinter printer = new CSVPrinter(out, CSVFormat.EXCEL.withHeader(hedearsArray));
+        CSVPrinter printer = new CSVPrinter(out, CSVFormat.EXCEL.withHeader(headersArray));
         AnalyzedVotingData nationalAnalysis = new AnalyzedVotingData(national);
         nationalAnalysis.setValidPercent(validPercent(national));
         nationalAnalysis.setIssues(Collections.emptyList());

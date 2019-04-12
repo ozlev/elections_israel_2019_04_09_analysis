@@ -1,5 +1,6 @@
 import java.util.*;
 
+@SuppressWarnings("WeakerAccess")
 public class VotingData {
     private final String settlement;
     private final String symbol;

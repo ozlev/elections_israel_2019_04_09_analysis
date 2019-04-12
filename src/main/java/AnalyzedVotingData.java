@@ -1,6 +1,7 @@
 import java.util.ArrayList;
 import java.util.List;
 
+@SuppressWarnings({"WeakerAccess", "unused"})
 public class AnalyzedVotingData {
     private final VotingData data;
     private List<String> issues;
