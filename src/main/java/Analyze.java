@@ -50,9 +50,11 @@ public class Analyze {
     }
 
     private static void checkBySettlement(List<AnalyzedVotingData> allBallots) {
+        // Group the ballots by settlement.
         Map<String, List<AnalyzedVotingData>> bySettlement = allBallots.stream()
                 .collect(Collectors.groupingBy(a -> a.getData().getSymbol()));
 
+        // Run per-settlement calculations
         for (Map.Entry<String, List<AnalyzedVotingData>> e : bySettlement.entrySet()) {
             // Get the ballots for the current settlement
             List<AnalyzedVotingData> cur = e.getValue();
@@ -60,28 +62,43 @@ public class Analyze {
             if (cur.size() < 5) {
                 continue;
             }
+
             List<VotingData> allData = cur.stream().map(AnalyzedVotingData::getData).collect(Collectors.toList());
+            // Get total votes for settlement.
             VotingData settlementTotal = countVotes(allData, "*", "*", "*");
+
+            // Analyze each ballot in this settlement
             for (AnalyzedVotingData analysis : cur) {
-                Map<Party, Double> pn = analysis.getData().getNormalizedVotesByParty();
-                Map<Party, Double> sn = settlementTotal.getNormalizedVotesByParty();
-                if (!pn.keySet().equals(sn.keySet())) {
-                    System.out.printf("Mismatching keys between %s and its ballot %s:%n%s%n%s%n",
-                            analysis.getData().getSettlement(), analysis.getData().getBallotBoxId(), pn.keySet(), sn.keySet());
-                }
                 // Check sum of square distances from settlement average for each party (todo: should we generate an average without this ballot?)
-                double dist = 0d;
-                for (Party p : pn.keySet()) {
-                    Double v1 = pn.get(p);
-                    Double v2 = sn.get(p);
-                    dist += Math.pow(v1 - v2, 2);
-                }
+                double dist = getSumSquareDist(settlementTotal, analysis.getData());
                 if (dist > 0.5) {
                     System.out.printf("%s %s - Dist from settlement average is %.3f%n", analysis.getData().getSettlement(), analysis.getData().getBallotBoxId(), dist);
                 }
                 analysis.setSettlementDistanceRatio(dist);
             }
         }
+    }
+
+    /**
+     * Get the sum of square distances between the normalized votes for each party between two {@link VotingData} items
+     * @param v1 voting data 1
+     * @param v2 voting data 2
+     * @return sum of square distances between the voting ratio for each party
+     */
+    private static double getSumSquareDist(VotingData v1, VotingData v2) {
+        Map<Party, Double> ballotNorm = v2.getNormalizedVotesByParty();
+        Map<Party, Double> settlementNorm = v1.getNormalizedVotesByParty();
+        if (!ballotNorm.keySet().equals(settlementNorm.keySet())) {
+            System.out.printf("Mismatching keys between %s and its ballot %s:%n%s%n%s%n",
+                    v2.getSettlement(), v2.getBallotBoxId(), ballotNorm.keySet(), settlementNorm.keySet());
+        }
+        double dist = 0d;
+        for (Party p : ballotNorm.keySet()) {
+            Double d1 = ballotNorm.get(p);
+            Double d2 = settlementNorm.get(p);
+            dist += Math.pow(d1 - d2, 2);
+        }
+        return dist;
     }
 
     private static void fillIssues(List<AnalyzedVotingData> allBallots, VotingData national) {
@@ -113,6 +130,7 @@ public class Analyze {
      * @return list of issues, or empty list if there are none
      */
     private static List<String> checkForSwitches(VotingData ballot, VotingData national) {
+        // todo: extract the major and fringe parties only once to improve performance (mostly irrelevant, since this takes very little time)
         // Get the 'fringe' parties (anything with less than 1% of the votes nationally), that have a high percentage in this ballot
         List<Map.Entry<Party, Double>> highFringe = ballot.getNormalizedVotesByParty().entrySet().stream()
                 .filter(e -> e.getValue() > 0.05 && national.getNormalizedVotesByParty().get(e.getKey()) < FRINGE_PARTY_MAX_RATIO)
@@ -127,12 +145,16 @@ public class Analyze {
         // If we have a possible switch, show it.
         if (!highFringe.isEmpty() && !lowMajor.isEmpty()) {
             StringBuilder sb = new StringBuilder();
-            highFringe.forEach(e -> sb.append(e.getKey().getName() + "=" + ballot.getVotesByParty().get(e.getKey()) + " ; "));
-            lowMajor.forEach(e -> sb.append(e.getKey().getName() + "=" + ballot.getVotesByParty().get(e.getKey()) + " ; "));
+            highFringe.forEach(e -> addPartyVotes(ballot, sb, e));
+            lowMajor.forEach(e -> addPartyVotes(ballot, sb, e));
             result.add(sb.toString());
         }
 
         return result;
+    }
+
+    private static StringBuilder addPartyVotes(VotingData ballot, StringBuilder sb, Map.Entry<Party, Double> e) {
+        return sb.append(e.getKey().getName() + "=" + ballot.getVotesByParty().get(e.getKey()) + " ; ");
     }
 
     private static double validPercent(VotingData data) {
@@ -181,6 +203,14 @@ public class Analyze {
         }
     }
 
+    /**
+     * Count the total voting data from a list of ballots (using optional filters)
+     * @param allBallots ballots to add
+     * @param settlement settlement name (for the returned {@link VotingData} item)
+     * @param settlementSymbol settlement symbol wildcard (if not null, only ballots from this settlement are counted)
+     * @param ballotBoxId ballot box symbol wildcard (if not null, only ballots matching this are counted)
+     * @return summary {@link VotingData} for all matching ballots
+     */
     @SuppressWarnings("SameParameterValue")
     private static VotingData countVotes(List<VotingData> allBallots, String settlement, String settlementSymbol, String ballotBoxId) {
         VotingData base = new VotingData(settlement, settlementSymbol, ballotBoxId, 0, 0, 0, 0, new HashMap<>());
