@@ -15,6 +15,9 @@ import java.util.stream.Collectors;
  */
 public class Analyze {
 
+    public static final double MAJOR_PARTY_MIN_RATIO = 0.2;
+    public static final double FRINGE_PARTY_MAX_RATIO = 0.01;
+
     public static void main(String[] args) {
         try {
             // Read parties
@@ -32,9 +35,9 @@ public class Analyze {
             VotingData national = countVotes(ballots, "*", "*", "*");
             displayVotes(national);
 
-            // Check for some basic issues
+            // Check for issues
             List<AnalyzedVotingData> analysis = ballots.stream().map(AnalyzedVotingData::new).collect(Collectors.toList());
-            checkBasicIssues(analysis);
+            fillIssues(analysis, national);
 
             // Generate stats by settlement
             checkBySettlement(analysis);
@@ -81,10 +84,13 @@ public class Analyze {
         }
     }
 
-    private static void checkBasicIssues(List<AnalyzedVotingData> allBallots) {
+    private static void fillIssues(List<AnalyzedVotingData> allBallots, VotingData national) {
         for (AnalyzedVotingData analysis : allBallots) {
             VotingData data = analysis.getData();
             List<String> issues = data.getSimpleIssues();
+
+            issues.addAll(checkForSwitches(data, national));
+
             analysis.setIssues(issues);
             double validPercent = validPercent(data);
             analysis.setValidPercent(validPercent);
@@ -98,6 +104,35 @@ public class Analyze {
 
             }
         }
+    }
+
+    /**
+     * Check for suspicious switches of all votes tallied to a party with another
+     * @param ballot current ballot voting
+     * @param national national voting data
+     * @return list of issues, or empty list if there are none
+     */
+    private static List<String> checkForSwitches(VotingData ballot, VotingData national) {
+        // Get the 'fringe' parties (anything with less than 1% of the votes nationally), that have a high percentage in this ballot
+        List<Map.Entry<Party, Double>> highFringe = ballot.getNormalizedVotesByParty().entrySet().stream()
+                .filter(e -> e.getValue() > 0.05 && national.getNormalizedVotesByParty().get(e.getKey()) < FRINGE_PARTY_MAX_RATIO)
+                .collect(Collectors.toList());
+
+        // Get the 'major' parties (anything with more than 20% of the votes nationally) that have a low percentage in this ballot
+        List<Map.Entry<Party, Double>> lowMajor = ballot.getNormalizedVotesByParty().entrySet().stream()
+                .filter(e -> e.getValue() < 0.001 && national.getNormalizedVotesByParty().get(e.getKey()) > MAJOR_PARTY_MIN_RATIO)
+                .collect(Collectors.toList());
+
+        List<String> result = new ArrayList<>();
+        // If we have a possible switch, show it.
+        if (!highFringe.isEmpty() && !lowMajor.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            highFringe.forEach(e -> sb.append(e.getKey().getName() + "=" + ballot.getVotesByParty().get(e.getKey()) + " ; "));
+            lowMajor.forEach(e -> sb.append(e.getKey().getName() + "=" + ballot.getVotesByParty().get(e.getKey()) + " ; "));
+            result.add(sb.toString());
+        }
+
+        return result;
     }
 
     private static double validPercent(VotingData data) {
