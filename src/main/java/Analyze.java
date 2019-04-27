@@ -215,7 +215,7 @@ public class Analyze {
     private static VotingData countVotes(List<VotingData> allBallots, String settlement, String settlementSymbol, String ballotBoxId) {
         VotingData base = new VotingData(settlement, settlementSymbol, ballotBoxId, 0, 0, 0, 0, new HashMap<>());
         return allBallots.stream()
-                .filter(p -> settlementSymbol == null || p.getBallotBoxId().matches(toWildcard(settlementSymbol)))
+                .filter(p -> settlementSymbol == null || p.getSymbol().matches(toWildcard(settlementSymbol)))
                 .filter(p -> ballotBoxId == null || p.getBallotBoxId().matches(toWildcard(ballotBoxId)))
                 .reduce(base, VotingData::combine);
     }
